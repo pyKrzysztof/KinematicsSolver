@@ -4,7 +4,7 @@ from sympy import cos, sin, tan, acos, asin, atan
 import numpy as np
 import itertools
 import matplotlib.pyplot as plt
-
+import pickle
 
 
 class Range:
@@ -66,6 +66,9 @@ class Ranges:
     def __len__(self):
         return len(self.ranges)
 
+    def get_optimized(self):
+        return [[r[1].name, r[1].minimum, r[1].value, r[1].maximum] for r in self.ranges]
+
 
 class Result:
 
@@ -90,7 +93,7 @@ class Link:
     def __init__(self, data):
         self.data = data[0]  # [d, x, range(tx), range(tz)]
         self.idx = data[1]
-        self.symbols = sm.symbols(f"d{self.idx}, x{self.idx}, thetaX{self.idx}, thetaZ{self.idx}")
+        self.symbols = sm.symbols(f"d{self.idx}, x{self.idx}, a{self.idx}, theta{self.idx}")
         self.matrix = None
 
     def get_transform(self):
@@ -115,8 +118,9 @@ class Solver:
         self.initialized = False
         self.transform = sm.Matrix()
         self.matching_matrix = sm.Matrix()
-        self._forward = (None, None)
+        self._forward = (None, Ranges())
         self._inverse = (None, None)
+        self._working_area = None
 
     def initialize(self):
         self.initialized = True
@@ -149,10 +153,10 @@ class Solver:
                     continue
                 matching[idx] = (list(self.transform.free_symbols)[idx], data)
 
-        matching = [pair for pair in matching if pair]
+        self._matching = [pair for pair in matching if pair]
         ranges = [pair for pair in ranges if pair]
 
-        matrix = self.transform.subs(matching)
+        matrix = self.transform.subs(self._matching)
         self.matching_matrix = matrix
 
         def _forward_calculate(range_values: Ranges):
@@ -179,7 +183,7 @@ class Solver:
                 # print(idx_s, sym)
                 a[idx_v, idx_s] = sm.diff(value, sym)
                 b[:, idx_s] = links_transform[idx_s][:-1, 2]
-        self._inverse = (sm.Matrix.vstack(a, b), ranged_symbols)
+        self._inverse = (sm.Matrix.vstack(a, b).subs(self._matching), ranged_symbols)
         return self._inverse[0], self._inverse[1]
 
     def working_area(self, n):
@@ -204,8 +208,17 @@ class Solver:
 
         return X, Y, Z
 
-    def pack(self):
+    def pack(self, file: str, dimensions: int):
         if not self.initialized:
             self.initialize()
-        data = []
-        data[0] = self.matching_matrix
+
+        data = [self.matching_matrix,
+                dict(zip([r[1].name for r in self._forward[1].ranges], self._forward[1].get_symbols())),
+                self._forward[1].get_optimized(),
+                [link.get_transform().subs(self._matching) for link in self.links],
+                dimensions,
+                self._working_area,
+                None]
+
+        with open(file, 'wb') as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
