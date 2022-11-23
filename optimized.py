@@ -4,6 +4,7 @@ import pickle
 import matplotlib.pyplot as plt
 import sympy as sm
 import numpy as np
+import random
 
 
 class OptimizedSolver:
@@ -15,7 +16,7 @@ class OptimizedSolver:
             data = pickle.load(f)
         self.matching_matrix = data[0]
         self._symbols: dict = data[1]
-        self._ranges = data[2]
+        self._ranges = data[2] # name, minimum, value, maximum
         self._link_transforms = data[3]
         self._dimensions = data[4]
         self._working_area = data[5]
@@ -71,7 +72,9 @@ class OptimizedSolver:
             Z.append(z)
         self._working_area = [n, [X, Y, Z]]
         if plot:
-            return self.plot2d(X, Y, Z)
+            if self._dimensions == 2:
+                return self.plot2d(X, Y)
+            return None # TODO: 3d plot for working area
         return X, Y, Z
 
     def close_and_update(self):
@@ -115,12 +118,8 @@ class OptimizedSolver:
             self._inverse_jacobian = self._jacobian[:max(3, nlinks), :].pinv()
         return self._jacobian, self._inverse_jacobian
 
-    def inverse(self, x, y, z=None, initial_inv_vars=None, timeout=300, error_margin=0.005):
+    def inverse(self, x, y, z=None, initial_inv_vars=None, timeout=300, error_margin=0.005, delta=0.1, plot=False):
         nlinks = len(self._link_transforms)
-        inv_variables = []
-        for link in self._link_transforms:
-            for var in link.free_symbols:
-                inv_variables.append(var)
 
         if z is None:
             position_matrix = sm.Matrix([x, y])
@@ -134,47 +133,75 @@ class OptimizedSolver:
 
         ji_template = self._jacobian[:max(2, nlinks), :].inv()
 
-        def update(prev_values, delta):
+        def update(prev_values, d):
 
             targetV = position_matrix - self.matching_matrix.subs(prev_values)[:position_matrix.shape[0], -1]
-            delta_target = delta * (targetV / targetV.norm())
+            delta_target = d * (targetV / targetV.norm())
 
             ji = ji_template.subs(prev_values)
             deltaValues = ji * delta_target
             new_values = []
-            # print(deltaValues)
             for dv, val in zip(deltaValues, prev_values):
                 new_values.append([val[0], val[1] + dv])
 
-            # print(targetV)
+            for i, (s, v) in enumerate(new_values):
+                name = [k for k, v in self._symbols.items() if v == s][0]
+                r = [(s1[1], s1[2], s1[3]) for s1 in self._ranges if s1[0] == name][0]
+
+                if r[0] + error_margin <= v <= r[2] + error_margin:
+                    continue
+                new_values[i][1] = random.uniform(r[0], r[2])
+                d = -d
+                # print(f"resetting {s} to {new_values[i][1]}")
+
             if (-error_margin < targetV[0,0] < error_margin) and (-error_margin < targetV[1,0] < error_margin):
                 if self._dimensions == 2:
-                    return prev_values, 1
+                    return prev_values, d, 1
                 if [-error_margin < targetV[2, 0] < error_margin]:
-                    return prev_values, 1
+                    return prev_values, d, 1
 
+            return new_values, d, 0
 
-            return new_values, 0
-
-        i = 0
+        t = 0
         curr = init
-        while i != timeout:
-            i = i + 1
-            curr, is_done = update(curr, 0.01)
+        dt = delta
+        while t != timeout:
+            t = t + 1
+            curr, dt, is_done = update(curr, dt)
             if is_done:
-                return curr
-        return None
+                break
 
+        if t == timeout:
+            return None
 
+        if plot:
+            self.plot_inverse(curr)
 
+        return curr
 
+    def plot_inverse(self, values):
+        coords = []
+        for link in self._link_transforms[0:-1]:
+            matching = link.subs(values)
+            # TODO: for each link calculate transform to frame 0
+            link_cords = matching[:3, 3:]
+            coords.append(link_cords)
 
+        coords.append(self.matching_matrix.subs(values)[:3, 3:])
+        x = [0,]
+        y = [0,]
+        z = [0,]
+        for c in coords:
+            x.append(c[0])
+            y.append(c[1])
+            if self._dimensions == 3:
+                z.append(c[2])
 
-        # result = self._inverse_jacobian * position_matrix
-
-
-
-        # print(repr(target_variables))
+        if self._dimensions == 2:
+            plt.plot(x, y)
+        else:
+            pass # TODO: 3d plot
+        plt.show()
 
     @staticmethod
     def plot2d(x, y):
@@ -184,3 +211,5 @@ class OptimizedSolver:
     @staticmethod
     def plot3d(x, y, z):
         pass
+
+

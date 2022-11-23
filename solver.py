@@ -119,15 +119,14 @@ class Solver:
         self.transform = sm.Matrix()
         self.matching_matrix = sm.Matrix()
         self._forward = (None, Ranges())
-        self._inverse = (None, None)
+        self._matching = None
         self._working_area = None
 
     def initialize(self):
         self.initialized = True
         self.get_transform_matrix()
         self.forward()
-        # self.inverse()
-        return self._forward[0], self._forward[1], self._inverse[0], self._inverse[1]
+        return self._forward[0], self._forward[1]
 
     def add_links(self, *parameters: list):
         for link in parameters:
@@ -165,26 +164,6 @@ class Solver:
             return Result(matrix.subs(range_values.values))
 
         self._forward = (_forward_calculate, Ranges(*ranges))
-
-    def inverse(self, ranged_symbols=None, h_transform=None):
-        if not h_transform:
-            h_transform = self.transform
-        if not ranged_symbols:
-            ranged_symbols = [link.symbols for link in self.links]
-            print(ranged_symbols)
-
-        a = sm.ones(3, self.nlinks)
-        b = sm.ones(3, self.nlinks)
-        column = h_transform[:-1, -1]
-        links_transform = [link.get_transform() for link in self.links]
-        for idx_v, value in enumerate(column):
-            # print(idx_v, value)
-            for idx_s, sym in enumerate(ranged_symbols):
-                # print(idx_s, sym)
-                a[idx_v, idx_s] = sm.diff(value, sym)
-                b[:, idx_s] = links_transform[idx_s][:-1, 2]
-        self._inverse = (sm.Matrix.vstack(a, b).subs(self._matching), ranged_symbols)
-        return self._inverse[0], self._inverse[1]
 
     def working_area(self, n):
         if not self.initialized:
