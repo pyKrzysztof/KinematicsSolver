@@ -1,4 +1,3 @@
-# from solver import Solver
 import itertools
 import pickle
 import matplotlib.pyplot as plt
@@ -113,32 +112,41 @@ class OptimizedSolver:
         self._jacobian = sm.Matrix.hstack(*columns)
 
         if self._dimensions == 2:
-            self._inverse_jacobian = self._jacobian[:max(2, nlinks), :].inv()
+            temp : sm.Matrix = self._jacobian[[0,1], :]
+            print(temp.shape)
+            r = [0, 1]
+            while temp.shape[0] != temp.shape[1]:
+                temp = temp.row_insert(-1, sm.Matrix([[1]*temp.shape[1]]))
+            self._inverse_jacobian = temp.inv()
         else:
             self._inverse_jacobian = self._jacobian[:max(3, nlinks), :].pinv()
         return self._jacobian, self._inverse_jacobian
 
-    def inverse(self, x, y, z=None, initial_inv_vars=None, timeout=300, error_margin=0.005, delta=0.1, plot=False):
+    def inverse(self, x, y, z=0, initial_inv_vars=None, timeout=300, error_margin=0.005, delta=0.1, plot=False):
         nlinks = len(self._link_transforms)
 
-        if z is None:
-            position_matrix = sm.Matrix([x, y])
-        else:
-            position_matrix = sm.Matrix([x, y, z])
+        position_matrix = sm.Matrix([x, y, z])
 
         if not initial_inv_vars:
             init = [[self._symbols[r[0]], r[2]] for r in self._ranges]
         else:
             init = initial_inv_vars
+        # ji_template = self._jacobian[:max(2, nlinks), :].inv()
 
-        ji_template = self._jacobian[:max(2, nlinks), :].inv()
+        ji_template : sm.Matrix = self._inverse_jacobian
+
+        if ji_template.shape[1] != 3:
+            # print(ji_template.shape)
+            ji_template = ji_template.col_insert(2, sm.Matrix([1]*ji_template.shape[0]))
+            # print(repr(ji_template))
 
         def update(prev_values, d):
-
-            targetV = position_matrix - self.matching_matrix.subs(prev_values)[:position_matrix.shape[0], -1]
+            targetV = position_matrix - self.matching_matrix.subs(prev_values)[:3, -1]
             delta_target = d * (targetV / targetV.norm())
 
             ji = ji_template.subs(prev_values)
+            # print(repr(ji))
+
             deltaValues = ji * delta_target
             new_values = []
             for dv, val in zip(deltaValues, prev_values):
@@ -180,14 +188,20 @@ class OptimizedSolver:
         return curr
 
     def plot_inverse(self, values):
-        coords = []
-        for link in self._link_transforms[0:-1]:
-            matching = link.subs(values)
-            # TODO: for each link calculate transform to frame 0
-            link_cords = matching[:3, 3:]
-            coords.append(link_cords)
 
-        coords.append(self.matching_matrix.subs(values)[:3, 3:])
+        first_M = self._link_transforms[0].subs(values)
+        final_M = self.matching_matrix.subs(values)
+        matrices = [first_M, ]
+        coords = [first_M[:3, 3:], ]
+        for link in self._link_transforms[1:-1]:
+            temp = link.subs(values)
+            for m in matrices:
+                temp = m * temp
+            matrices.append(temp)
+            coords.append(temp[:3, 3:])
+
+        coords.append(final_M[:3, 3:])
+
         x = [0,]
         y = [0,]
         z = [0,]
@@ -201,11 +215,13 @@ class OptimizedSolver:
             plt.plot(x, y)
         else:
             pass # TODO: 3d plot
+        plt.gca().set_aspect('equal')
         plt.show()
 
     @staticmethod
     def plot2d(x, y):
         plt.scatter(x, y)
+        plt.gca().set_aspect('equal')
         plt.show()
 
     @staticmethod
